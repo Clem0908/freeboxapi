@@ -339,7 +339,7 @@ def check_lan_mac_db():
         if ans.status_code != 200:
             request_failed(ans.status_code, BASE_URL+"/lan/browser/pub/", ans.json())
         session_stop()
-        print(str(select))
+
         for host in ans.json().get("result", []):
             
             if host.get("l2ident", {}).get("id", "") not in select:
