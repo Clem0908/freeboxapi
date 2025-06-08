@@ -2,11 +2,15 @@ import base64
 import datetime
 import hmac
 import hashlib
+import os
 import requests
+import sqlite3
+import sys
 import time
 import typing
 from typing import Any
 import urllib3
+import urllib.parse
 import json
 urllib3.disable_warnings()
 
@@ -46,8 +50,6 @@ def login() -> None:
     
     with open(".challenge", "w") as f:
         f.write(CHALLENGE)
-
-    action()
     
     return
 
@@ -58,8 +60,6 @@ def session_stop() -> None:
 
     if ans.status_code != 200:
         request_failed(ans.status_code, BASE_URL+"/login/logout/", ans.json())
-
-    action()
 
     return
 
@@ -80,7 +80,11 @@ def action() -> None:
     "- session_start\n"\
     "- session_stop\n"\
     "- lan_browser_interfaces\n"\
-    "- clean_old_lan_macs\n"\
+    "- clean_lan_mac\n"\
+    "- clean_old_lan_macs [days]\n"\
+    "- create_lan_mac_db\n"\
+    "- insert_lan_mac_db\n"\
+    "- check_lan_mac_db\n"\
     "- exit\n")
     act = input("-> ")
     print("")
@@ -97,8 +101,19 @@ def action() -> None:
         session_stop()
     elif act == "lan_browser_interfaces":
         lan_browser_interfaces()
-    elif act == "clean_old_lan_macs":
-        clean_old_lan_macs()
+    elif act == "clean_lan_mac":
+        clean_lan_mac()
+    elif "clean_old_lan_macs" in act:
+        if act.lstrip("clean_old_lan_macs ") == "":
+            clean_old_lan_macs()
+        else:
+            clean_old_lan_macs(int(act.lstrip("clean_old_lan_macs ")))
+    elif act == "create_lan_mac_db":
+        create_lan_mac_db()
+    elif act == "insert_lan_mac_db":
+        insert_lan_mac_db()
+    elif act == "check_lan_mac_db":
+        check_lan_mac_db()
     elif act == "exit":
         exit(0)
     elif act == "\n":
@@ -161,7 +176,6 @@ def get_app_token():
 
         request_failed(ans.status_code, BASE_URL+"/login/authorize/", ans.json())
 
-    action()
     return
 
 
@@ -179,7 +193,6 @@ def session_start() -> None:
     ans = requests.post(BASE_URL+"/login/session/", data=json.dumps(data), verify=False)
 
     if ans.status_code != 200:
-
         request_failed(ans.status_code, BASE_URL+"/login/session/", ans.json())
 
     global SESSIONTOKEN
@@ -187,7 +200,7 @@ def session_start() -> None:
 
     with open(".session_token", "w") as f:
         f.write(SESSIONTOKEN)
-    action()
+
     return
  
 
@@ -199,25 +212,36 @@ def read_session_token() -> str:
 
 def lan_browser_interfaces():
     
+    login()
+    session_start()
     ans = requests.get(BASE_URL+"/lan/browser/interfaces", headers={ "X-Fbx-App-Auth": read_session_token() }, verify=False)
-    print(ans.json())
+    if ans.status_code != 200:
+        request_failed(ans.status_code, BASE_URL+"/lan/browser/interfaces", ans.json())
 
-    action()
+    print(ans.json())
+    session_stop()
+
     return
 
 
-def clean_old_lan_macs():
+def clean_old_lan_macs(*args):
     
+    login()
+    session_start()
+    if not args:
+        days = 182
+    else:
+        days = args[0]
     ans = requests.get(BASE_URL+"/lan/browser/pub", headers={ "X-Fbx-App-Auth": read_session_token() }, verify=False)
 
     if ans.status_code != 200:
         request_failed(ans.status_code, BASE_URL+"/lan/browser/pub", ans.json())
 
     last_seen: list[int] = []
-    pub_hosts: list[dict[Any,Any]] = ans.json().get("result", [{}])
+    pub_hosts: list[dict[Any,Any]] = ans.json().get("result", [])
 
     now = datetime.datetime.now()
-    delta = datetime.timedelta(days=182)
+    delta = datetime.timedelta(days=days)
     now = int((now - delta).timestamp())
 
     for host in pub_hosts:
@@ -226,11 +250,116 @@ def clean_old_lan_macs():
             if ans.status_code != 200:
                 request_failed(ans.status_code, BASE_URL+"/lan/browser/pub/"+host.get("id","")+"/", ans.json())
 
-    action()
+    session_stop()
+
+    return
+
+def clean_lan_mac():
+    
+    print("Please enter the MAC to remove on the Freebox: ")
+    mac = input("-> ")
+    mac = "ether-"+mac.lower()
+    login()
+    session_start()
+
+    ans = requests.delete(BASE_URL+"/lan/browser/pub/"+mac+"/", headers={ "X-Fbx-App-Auth": read_session_token() }, verify=False)
+    if ans.status_code != 200:
+        request_failed(ans.status_code, BASE_URL+"/lan/browser/pub/"+mac+"/", ans.json())
+
+    session_stop()
 
     return
 
 
+def insert_lan_mac_db():
+
+    print("MAC?")
+    mac = input("-> ")
+    print("Hostname?")
+    hostname = input("-> ")
+
+    connection = sqlite3.connect("lan_mac_db.db")
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO hosts VALUES
+            ('"""+mac+"""', '"""+hostname+"""')
+        """)
+    connection.commit()
+    connection.close()
+
+def create_lan_mac_db():
+
+    if os.path.exists("lan_mac_db.db"):
+        print("lan_mac_db.db already exists")
+        return
+
+    connection = sqlite3.connect("lan_mac_db.db")
+    cursor = connection.cursor()
+    cursor.execute("CREATE TABLE hosts(mac, hostname)")
+    connection.close()
+
+    return
+
+
+def send_free_mobile_sms(message: str):
+
+    f = open(".freemobileuser", "r")
+    user = f.read()
+    f.close()
+    f = open(".freemobiletoken", "r")
+    token = f.read()
+    f.close()
+
+    user = user.rstrip("\n")
+    token = token.rstrip("\n")
+
+    payload = {"user": user, "pass": token, "msg": message}
+
+    ans = requests.get("https://smsapi.free-mobile.fr/sendmsg", params=payload, verify=True)
+    if ans.status_code != 200:
+        request_failed(ans.status_code, "/sendmsg", {})
+
+    return
+
+def check_lan_mac_db():
+
+    while True:
+        
+        login()
+        session_start()
+        connection = sqlite3.connect("lan_mac_db.db")
+        cursor = connection.cursor()
+        select = cursor.execute("SELECT mac,hostname FROM hosts")
+        select = select.fetchall()
+        select = dict(select)
+        connection.close()
+
+        ans = requests.get(BASE_URL+"/lan/browser/pub/", headers={ "X-Fbx-App-Auth": read_session_token() }, verify=False)
+        if ans.status_code != 200:
+            request_failed(ans.status_code, BASE_URL+"/lan/browser/pub/", ans.json())
+        session_stop()
+        print(str(select))
+        for host in ans.json().get("result", []):
+            
+            if host.get("l2ident", {}).get("id", "") not in select:
+                if host.get("reachable"):
+                    send_free_mobile_sms("freebox_api.py - unkown MAC is connected: "+host.get("l2ident", {}).get("id", "")+" | "+host.get("primary_name", ""))
+                    time.sleep(540)
+        time.sleep(60)
+
+
 if __name__ == "__main__":
+
     set_globals()
-    action()
+    
+    argv = sys.argv[1]
+    if len(argv) < 1:
+        print("Please run this script with either 'cli' or 'daemon' as an argument")
+        exit(0)
+
+    if argv == "cli":
+        action()
+    elif argv == "daemon":
+        check_lan_mac_db()
+        exit(0)

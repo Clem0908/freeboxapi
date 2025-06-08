@@ -1,3 +1,6 @@
 .app_token
 .challenge
 .session_token
+.freemobileuser
+.freemobiletoken
+lan_mac_db.db
