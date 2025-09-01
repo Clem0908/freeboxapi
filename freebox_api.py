@@ -40,10 +40,14 @@ def set_globals() -> None:
 
 def login() -> None:
 
-    ans = requests.get(BASE_URL+"/login", verify=False)
+    try:
+        ans = requests.get(BASE_URL+"/login", verify=False)
 
-    if ans.status_code != 200:
-        request_failed(ans.status_code, BASE_URL+"/login", ans.json())
+        if ans.status_code != 200:
+            request_failed(ans.status_code, BASE_URL+"/login", ans.json())
+    except requests.exceptions.ConnectionError:
+        print("!! [login]: requests.exceptions.ConnectionError")
+        return
 
     global CHALLENGE
     CHALLENGE = ans.json().get("result", {}).get("challenge", "")
@@ -66,8 +70,11 @@ def session_stop() -> None:
 
 def get_api_version() -> dict[str, str]:
 
-    ans: dict[str,str] = requests.get("http://mafreebox.freebox.fr/api_version", verify=False)
-    #print("API info:\n"+str(ans.json()))
+    try:
+        ans: dict[str,str] = requests.get("http://mafreebox.freebox.fr/api_version", verify=False)
+    except requests.exceptions.ConnectionError:
+        return {"": ""}
+        #print("API info:\n"+str(ans.json()))
 
     return ans.json()
 
@@ -316,9 +323,12 @@ def send_free_mobile_sms(message: str):
 
     payload = {"user": user, "pass": token, "msg": message}
 
-    ans = requests.get("https://smsapi.free-mobile.fr/sendmsg", params=payload, verify=True)
-    if ans.status_code != 200:
-        request_failed(ans.status_code, "/sendmsg", {})
+    try:
+        ans = requests.get("https://smsapi.free-mobile.fr/sendmsg", params=payload, verify=True)
+        if ans.status_code != 200:
+            request_failed(ans.status_code, "/sendmsg", {})
+    except requests.exceptions.ConnectionError:
+        print("!! [send_free_mobile_sms]: requests.exceptions.ConnectionError")
 
     return
 
