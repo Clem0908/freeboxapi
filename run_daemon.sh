@@ -1,2 +1,2 @@
 #!/bin/bash
-./venv/bin/python freebox_api.py daemon
+./venv/bin/python freebox_api.py daemon 2> daemon.log
