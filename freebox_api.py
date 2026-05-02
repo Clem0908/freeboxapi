@@ -31,7 +31,7 @@ def set_globals() -> None:
     API_DOMAIN = ret.get("api_domain", "")
     API_BASE_URL = ret.get("api_base_url", "")
     API_VERSION = ret.get("api_version", "")
-    API_VERSION = float(API_VERSION)
+    API_VERSION = API_VERSION.rstrip(".[0-9]*")
     API_VERSION = int(API_VERSION)
     BASE_URL = "https://"+API_DOMAIN+":"+str(HTTPS_PORT)+API_BASE_URL+"v"+str(API_VERSION)
 
